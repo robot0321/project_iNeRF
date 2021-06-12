@@ -29,5 +29,8 @@ target_index = 8		# target pose index
 ```
 * The iteration time differs by `sampledown`. If you want iterate fast to see the result quickly, set the `sampledown=16`. The generated video will be low resolution, but it takes only 1~3 minutes. In the case you want to generate high resolution video, set the `sampledown=1`. (takes about 1 hour)
 
+## Experiment
+[Notion](https://www.notion.so/iNeRF-6357f04abd21410cb10d7d698fc3e6ac)
+
 ## Notice
 * Please make your branch and do NOT push on master branch
