@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
+import torchvision.models as pretrained_models
 
 import matplotlib.pyplot as plt
 
@@ -68,7 +69,7 @@ def batchify_rays(rays_flat, chunk=1024*32, **kwargs):
 
 def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
                   near=0., far=1.,
-                  use_viewdirs=False, c2w_staticcam=None,
+                  use_viewdirs=False, c2w_staticcam=None, Hidx=None, Widx=None,
                   **kwargs):
     """Render rays
     Args:
@@ -99,6 +100,13 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
         # use provided ray batch
         rays_o, rays_d = rays
 
+    ############################################ for random ray
+    if type(Hidx)!=type(None) and type(Widx)!=type(None):
+        rays_o = rays_o[Hidx, Widx, :] # (sN, 3)
+        rays_d = rays_d[Hidx, Widx, :] # (sN, 3)
+    ############################################
+
+
     if use_viewdirs:
         # provide ray directions as input
         viewdirs = rays_d
@@ -119,6 +127,7 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
 
     near, far = near * torch.ones_like(rays_d[...,:1]), far * torch.ones_like(rays_d[...,:1])
     rays = torch.cat([rays_o, rays_d, near, far], -1)
+
     if use_viewdirs:
         rays = torch.cat([rays, viewdirs], -1)
 
@@ -529,6 +538,8 @@ def config_parser():
                         help='frequency of testset saving')
     parser.add_argument("--i_video",   type=int, default=50000, 
                         help='frequency of render_poses video saving')
+    parser.add_argument("--feature_loss", action='store_true', 
+                        help='using VGG feature loss')
 
     return parser
 
@@ -693,6 +704,11 @@ def train():
     # Summary writers
     # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
     
+    #########################
+    vgg16feat = pretrained_models.vgg16(pretrained=True)
+    vgg16feat = vgg16feat.features[:9]
+    #########################
+
     start = start + 1
     for i in trange(start, N_iters):
         time0 = time.time()
@@ -756,6 +772,13 @@ def train():
             img_loss0 = img2mse(extras['rgb0'], target_s)
             loss = loss + img_loss0
             psnr0 = mse2psnr(img_loss0)
+        ############################################################
+        if args.feature_loss:
+            print("using feature loss ")
+            feat_loss0 = img2mse(vgg16feat(rgb), vgg16feat(target_s))
+            loss = loss + feat_loss0
+            featpsnr = mse2psnr(feat_loss0)
+        ############################################################
 
         loss.backward()
         optimizer.step()
@@ -811,7 +834,7 @@ def train():
 
     
         if i%args.i_print==0:
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()} featPSNR: {featpsnr.item()}")
         """
             print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())
             print('iter time {:.05f}'.format(dt))
