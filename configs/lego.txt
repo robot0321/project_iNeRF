@@ -3,6 +3,7 @@ basedir = ./logs
 datadir = ./data/nerf_synthetic/lego
 dataset_type = blender
 
+ft_path = ./logs/blender_paper_lego
 no_batching = True
 
 use_viewdirs = True
