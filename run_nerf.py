@@ -328,7 +328,9 @@ def render_rays(ray_batch,
                 white_bkgd=False,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False):
+                pytest=False,
+                pre_weights=None,
+                pre_zsample=None):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -392,26 +394,36 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
 
-#     raw = run_network(pts)
+#     raw = run_network(pts) fuck
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+    if pre_weights != None:
+        assert weights.shape == pre_weights.shape # [N_rays, N_samples]
+        weights = pre_weights
+        # weights = weights/5 + pre_weights*4/5.
+
 
     if N_importance > 0:
-
         rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-        z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-        z_samples = z_samples.detach()
+        if pre_zsample != None:
+            z_samples = pre_zsample
+        else:
+            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
+            z_samples = z_samples.detach()
+
+
 
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+        # z_vals, _ = torch.sort(z_samples, -1)
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
 
         run_fn = network_fn if network_fine is None else network_fine
 #         raw = run_network(pts, fn=run_fn)
         raw = network_query_fn(pts, viewdirs, run_fn)
 
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
+        rgb_map, disp_map, acc_map, weights2, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd, pytest=pytest)
 
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map}
     if retraw:
@@ -421,6 +433,9 @@ def render_rays(ray_batch,
         ret['disp0'] = disp_map_0
         ret['acc0'] = acc_map_0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
+    ret['weights2'] = weights2
+    ret['weights'] = weights
+    ret['z_samples'] = z_samples
 
     for k in ret:
         if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
@@ -523,7 +538,7 @@ def config_parser():
     parser.add_argument("--lindisp", action='store_true', 
                         help='sampling linearly in disparity rather than depth')
     parser.add_argument("--spherify", action='store_true', 
-                        help='set for spherical 360 scenes')
+                        help='set for spheriacal 360 scenes')
     parser.add_argument("--llffhold", type=int, default=8, 
                         help='will take every 1/N images as LLFF test set, paper uses 8')
 
@@ -705,8 +720,8 @@ def train():
     # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
     
     #########################
-    vgg16feat = pretrained_models.vgg16(pretrained=True)
-    vgg16feat = vgg16feat.features[:9]
+    # vgg16feat = pretrained_models.vgg16(pretrained=True)
+    # vgg16feat = vgg16feat.features[:9]
     #########################
 
     start = start + 1
@@ -773,11 +788,11 @@ def train():
             loss = loss + img_loss0
             psnr0 = mse2psnr(img_loss0)
         ############################################################
-        if args.feature_loss:
-            print("using feature loss ")
-            feat_loss0 = img2mse(vgg16feat(rgb), vgg16feat(target_s))
-            loss = loss + feat_loss0
-            featpsnr = mse2psnr(feat_loss0)
+        # if args.feature_loss:
+        #     print("using feature loss ")
+        #     feat_loss0 = img2mse(vgg16feat(rgb), vgg16feat(target_s))
+        #     loss = loss + feat_loss0
+        #     featpsnr = mse2psnr(feat_loss0)
         ############################################################
 
         loss.backward()

@@ -8,3 +8,5 @@
 data/*
 logs/*
 .vscode/
+iNeRFrender*/
+pre_*.pt
